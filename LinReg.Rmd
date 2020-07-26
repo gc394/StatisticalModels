@@ -1,18 +1,20 @@
 ---
-title: "LinReg"
+title: "Linear Regression with BES17 Dataset"
 author: "Greg Cooke"
 date: "26/07/2020"
 output:
-  bookdown::html_document2: default
+    bookdown::html_document2: default
 ---
 
-# Introduction
+# Setup {-}
 
 Linear Regression is a very simple statistical tool to find an estimate for a quantitative response variable, *Y*, using quantitative or qualitative predictors *X*. With regards to this tool we expect the model to have a high bias as, in most cases, there are not linear relationships in the real world but this does mean there is low variance due to it's low flexibility as the model is rigid. What this means the tool is better for  inference, as opposed to prediction as we can see the relationship between variables.
 
-In this case I will be using the BES 2017 dataset to show the utility of Linear Regression.
+I have adapted some work I did during my degree to this example. I am looking to demonstrate my understanding of simple linear regression as well as a knowledge of *R*, *Markdown*, *BibTex* and various statistical R packages. I am going to utilise the *2017 British Election Study* dataset that has been aggregated to the constituency level.
 
-```{r Setup, message = FALSE, include = FALSE, echo = F}
+I will start by calling on the various packages I will be using as well as importing the data which I have downloaded from ELE. 
+
+```{r Setup, message = FALSE}
 
 library(tidyverse)
 library(rlang)
@@ -24,39 +26,538 @@ library(ggrepel)
 library(stargazer)
 library(e1071)
 library(broom)
-
-```
-
-```{r}
+library(gridExtra)
 
 bes17 <- readRDS(paste0(getwd(), "/bes17.rds"))
 
 ```
 
-I will be looking at *Con17* (baker_general_2019) as my dependent variable and *Con15* and *c11EthnicityWhite* as my independent variables. The chosen variables are all continuous, ratio variables based between 0 and 100 as they represent percentages. This means there is no requirement to standardise the data as they are all based on the same measurement. *Con17* and *Con15* are the Conservative vote shares for the years 2017, 2015 and 2010 respectively whereas *c11EthnicityWhite* is the percentage of the constituents whose ethnicity is white.
+## Introduction {-}
+
+I will be looking at *Con17* (baker_general_2019) as my dependent variable and *Con15*, *Con10* (noauthor_past_nodate) and *c11EthnicityWhite* (cracknell_census_2014) as my independent variables. The chosen variables are all continuous, interval variables based between 0 and 100 as they represent percentages. This means there is no requirement to standardise the data as they are all based on the same measurement. *Con17*, *Con15* and *Con10* are the Conservative vote shares for the years 2017, 2015 and 2010 respectively whereas *c11EthnicityWhite* is the percentage of the constituents whose ethnicity is white. 
+
+I have split my hypothesis into three parts:
+
+$H_1$: The vote share for Conservatives in 2017 can be predicted by the Conservative vote share in 2015 due to voter stability
+
+$H_2$: The vote share for Conservatives in 2017 is positively correlated with the percentage of constituents with white ethnicity
+
+$H_3$: The 2015 Conservative Party vote share is a stronger predictor on the 2017 Conservative vote share than the % of constituents with white ethnicity.
+
+I believe $H_1$ to be the case as 'The number of safe seats increased significantly in the 2017 general election. Seats won with a margin of over 50% rose from 21 seats in 2015 to 35 in 2017. Seats won with a margin between 45% and 50% also increased from 18 in 2015 to 29 in 2017.' (@tutor2u_safe_2019). A party's prototypical policies will always do well in a certain area because of the socio-economic environment and although these do change, they do not usually do so in the short term. For example, a very wealthy constituency in the UK is more likely to favour tax-breaks, typical of conservative policy, or a constituency that contains a nature reserve will likely support green policies, typical of the Green Party.   
+
+$H_2$ is also a valid point as historically there have been strong relationships between race and vote on a constituency level (@khan_race_2015). As ethnicity can be considered a form of social identity I decided that it was a good variable to compare recent vote share to and I believe it will not prove to as strong an explanatory variable.
+
+Overall however I believe due to the short, two-year gap between the last two elections as well as the rise in safe seats $H_3$ will be affirmed.
 
 ```{r Selection, message = FALSE}
 
 bes17_test <- bes17 %>%
-  dplyr:: select(Con17, Con15, c11EthnicityWhite) 
+  dplyr:: select(Con17, Con15, Con10, c11EthnicityWhite) 
 
-summary(bes17_test)
+summary(bes17_test)  
 
 ```
 
-My first model is *Con15's* effect on *Con17*.
+There is a lot that can be potentially taken away from this model, from the temporal analysis of previous election results we can conclude with some confidence how consistent constituencies are with their election choices. If I can show strong auto-correlation with Conservative vote results then this could provide an efficient way to predict the electorate vote in the future. This could also highlight a culture of identity politics within constituencies whereby support for specific political parties is entrenched through supporter tribalism.
+
+Identity politics, especially race, is consistently an issue in the USA, for example, the Democrats have enjoyed a huge advantage with Black voters. According to Pew Research Center, since the 1980s the lowest advantage held from this ethnicity for Democratic candidate was still above 70points (@alec_behind_2016). I believe there is a similar phenomenon occurring in British politics, one which has been exaggerated by the vote for Britain to separate from the EU in the 2016 referendum. This hugely divisive and pivotal decision that has disrupted the UK's political environment and may have led to race playing a more significant part in the 2017 General Election.
+
+It is perhaps hyperbolic to  suggest that Brexit was the genesis of the UK's possible current social mentality however I believe it has amplified underlying ethnopolitical currents. My model will aim to quantify whether ethnicity plays a significant role in deciding the vote share for conservatives post-Brexit.
+
+## Variable Visualisations {-}
+
+To create each of the histograms of the variables I have produced the function *histPlotR* so as not to repeat any code. The arguments are *.var* which is the variable I am plotting and *mtitle*, the main title of the plot. This function also includes mean and median vlines to show highlight the skewness of the data in these variables.
+
+```{r Hist Plot Function}
+
+histPlotR <- function(.var, mtitle){
+
+varMean <- mean(bes17[, .var], na.rm = T)
+
+varMedian <- median(bes17[, .var], na.rm = T)
+  
+central_values <- data.frame(measurement = c("mean", "median"),
+                             value = c(varMean, varMedian))
+
+ggplot(data = bes17, aes_string(x = .var)) +
+  geom_histogram(binwidth = 2, colour = "White", fill = "#0087dc", na.rm = T) + 
+  geom_vline(data = central_values, aes(xintercept = value, color = measurement), size = 2) +
+  scale_color_manual(values = c("Black", "Red"), name = NULL) + 
+  ggtitle(paste0(mtitle)) 
+  
+  }
+
+```
+
+```{r Con17 Hist}
+
+histPlotR(.var = "Con17", mtitle = "Conservative Vote Share in 2017")
+
+```
+
+```{r Con15 Hist}
+
+histPlotR(.var = "Con15", mtitle = "Conservative Vote Share in 2015")
+
+```
+
+```{r Con10 Hist}
+
+histPlotR(.var = "Con10", mtitle = "Conservative Vote Share in 2010")
+
+```
+
+```{r White Ethnicity Hist}
+
+histPlotR(.var = "c11EthnicityWhite", mtitle = "% of constituents with white ethnicity in 2017")
+
+```
+
+*Con15*, *Con10* and *c11EthnicityWhite* all show variance which is an assumption of linear regression and essential if we want these variables to be able to account for the variation in our dependent variable, *Con17*.
+
+```{r Hist Sum Table}
+
+bes17_hist_stats <- tibble(Variable = c(names(bes17_test)), 
+                           Kurtosis = as.double(rep(NA, length(names(bes17_test)))),
+                           Skewness = as.double(rep(NA, length(names(bes17_test)))))
+
+ for (i in 1:nrow(bes17_hist_stats)){
+   
+   bes17_hist_stats[i,2] <- e1071::kurtosis(bes17_test[,i], na.rm = T, type = 2)
+   
+   bes17_hist_stats[i,3] <- e1071::skewness(bes17_test[,i], na.rm = T)
+   
+ }
+ 
+as.data.frame(bes17_hist_stats)
+
+```
+
+I have calculated the Kurtosis and Skewness of each graph because I believe these statistical descriptions are an important inclusion in the analysis of our variables.
+
+The kurtosis parameter is a measure of the combined weight of the tails relative to the rest of the distribution. (@westfall_kurtosis_2014) and it is important when assuming whether the data is normally distributed. 
+
+Where the kurtosis score is around 0 then it assumed to be normally distributed. As *Con17*, *Con15* and *Con10* are all quite negative we consider these to be 'light-tailed' datasets whereas *c11EthnicityWhite* is extremely 'heavy-tailed' which can be seen in the histogram.
+
+Skewness is usually described as a measure of a dataset’s symmetry – or lack of symmetry.   A perfectly symmetrical data set will have a skewness of 0. The normal distribution has a skewness of 0. (@mcneese_are_2008)
+
+All four of my variables are negatively skewed however *Con17*, *Con15* and *Con10* again share similar scores showing them to be quite minimally skewed whereas *c11EthnicityWhite* has a heavy skew.
+ 
+To plot each of my independent variables against *Con17*, I have created a function for the same aforementioned reason of efficiency, it is also eponymously named for ease - *scatPlotR*. I have included the names of the constituencies with the largest residual values to aid potential future necessary outlier analysis.
+
+```{r Scatter Plot Function}
+
+scatPlotR <- function(iv, mtitle){
+  
+  wrapR <- function(x, ...) {
+    
+  paste(strwrap(x, ...), collapse = "\n")
+  
+    }
+  
+  formula <- paste0("bes17$Con17 ~ bes17$", iv)
+  
+  res <- residuals(eval(call("lm", formula)))
+
+  rn <- row.names(as.data.frame(tail(sort(abs(res)), 2)))
+  
+  ggplot2::ggplot(data = bes17, aes_string(x = iv, y = "Con17")) +
+    geom_point(colour = "#0087dc", na.rm = T) + 
+    geom_smooth(method='lm', formula = y~x, colour = "Black") +
+    geom_text_repel(aes(label=ifelse(row.names(bes17) %in% rn, 
+                               as.character(ConstituencyName),''))) +
+    coord_cartesian(clip = 'off') +
+    ggtitle(wrapR(mtitle, 50))
+  
+}
+
+```
+
+```{r Con15 Scatter, warning=FALSE}
+
+scatPlotR(iv = "Con15", mtitle = "2017 to 2015 Conservative Vote Share")
+
+```
+
+This graph shows a strong, linear correlation between the vote share in 2015 and 2017 for the Conservatives. This suggests that the 2015 electoral results have a positive relationship with the 2017 vote share.
+
+```{r Con10 Scatter, warning=FALSE}
+
+scatPlotR(iv = "Con10", mtitle = "2017 to 2010 Conservative Vote Share")
+
+```
+
+This graph also shows a strong, positive relationship between the two continuous variables. There appear to be slightly higher average residuals but the correlation is still strong. 
+
+```{r White Ethnicity Scatter, warning=FALSE}
+
+scatPlotR(iv = "c11EthnicityWhite", mtitle = "% of constituents with white ethnicity in 2017 against 2017 Conservative Vote Share")
+
+```
+
+This third graph appears to have a slightly, weaker positive correlation between the variables. This could partly be to do with the unbalanced *c11EthnicityWhite* data which leads to a wider confidence interval on the left-hand side of the plot. 
+
+```{r Cor Table, warning = F}
+
+bes17_cor <- cor(bes17_test[, c("Con15", "Con10", "c11EthnicityWhite")], use = "complete.obs")
+
+round(bes17_cor, 3)
+
+```
+
+Above I have calculated the correlation table between the variables rounded to two decimal places.
+
+```{r SV Table}
+
+bes17_sv <- bes17_cor*bes17_cor
+
+round(bes17_sv, 3)
+
+```
+
+Here I have calculated the shared variance table between the variables rounded to three decimal places. For reference if the shared variance is above 0.5 then there is a problem of collinearity.
+
+As the model I'm going to be running is multivariate, it must satisfy all ten of the assumptions in multiple regression. As this currently shows there is strong evidence of multicollinearity between *Con15* and *Con10*, this is expected as they are measurements of the same variable at two close points in time. Both are measuring conservative votes for the same leader, David Cameron, with both producing very similar manifestos.
+
+Due to the result of the correlation and shared variance tables, it would make sense to omit one of *Con15* or *Con10*. If I do not action this then I should expect to see higher standard errors alongside wider confidence intervals and I am unable to apportion variance because it is shared between these two independent variables. These issues will make the model less interpretable and much less powerful when it comes to inference. 
+
+## Model 1 {-}
+
+In my first model I am going to omit the variable *Con10* in order to avoid violating the assumption of colinearity. 
+
 
 ```{r model 1, warning=F}
 
-model_1 <- lm(data = bes17_test, formula = Con17 ~ Con15)
+model_1 <- lm(data = bes17_test, formula = Con17 ~ Con15 +  c11EthnicityWhite)
 
 stargazer(model_1,
           type = "text",
           title = "OLS Regression Results for model 1",
           covariate.labels = c("Con15",
+                               "c11EthnicityWhite",
                                "Intercept"),
           out = "table1.text")
 
 ```
 
-As we can see from these results, there is a strong relationship between 
+The summary shows us that all explanatory variables are highly significant and from the r-squared term we see that the model explains 91.2% of the variance in *Con17*. This shows that the model has exceptionally high explanatory power.
+
+This allows us to say with confidence that for every 1 percentage point increase in the voter share for Conservatives in 2015, the vote share for Conservatives in 2017 would rise by 0.837 percentage points. The model also states that a 1 percentage point increase in the proportion of the population with white ethnicity, the vote share for Conservatives in 2017 would rise by 0.225 percentage points.
+
+These findings agree with the scatter plots from part 2 and our hypothesis which suggested that previous Conservative vote shares had a stronger effect on the 2017 Conservative Vote Share than the proportion of the local population of white ethnicity. 
+
+#### Assumptions {-}
+
+Two of the most important assumptions that are highly restrictive state that the relationship between the predictors and response are *additive* and *linear*.
+
+*Additive* means the effect in changes in a predictor $X_j$ on response *Y* is independent of the values of other predictors. *Linear* means that changes in the response *Y* due to a one-unit change in $X_j$ is constant, regardless of $X_j$. 
+
+In multivariate models, we have to satisfy ten assumptions, one of which we have just confirmed above. I will go through them now and test whether my model achieves the criteria and proves its validity.
+
+**Linearity**: This states that all parameters I estimate in my model are linear. I can prove this by looking at the Residuals vs Fitted Plot graph. What I expect to see is a flat, horizontal line where Residuals equal zero. This will tell me that there is no pattern in the residuals and that my model is not fundamentally wrong.
+
+I will plot a graph below which proves that my model is linear in parameters.
+
+**Exogeneity**: This states that the regressors cannot be correlated with the error term if they are then again the model is fundamentally biased. If $cor(x_i,u_i) = 0$ then it is the case that $cov(x_i,u_i) = 0$. We test this assumption with a correlation test where: 
+
+$H_0: cor(x_i,u_i) = 0$ 
+
+$H_a: cor(x_i,u_i) \neq 0$
+
+```{r cor test}
+
+ct <- cor.test(model_1$fitted,model_1$residuals)
+
+ct
+
+```
+
+As we can see from this output, the p-value is equal to 1 meaning that the test has failed to reject the null hypothesis and there is no correlation between the error term and my chosen regressors.
+
+**Mean of the Residuals is zero**: The mean of the residuals must equal otherwise the model is fundamentally biased. We have already gathered good evidence to suggest my model achieves this from the Residuals vs Fitted Graph. To certify this claim I will run a t-test where: 
+
+$H_0: \mu = 0$  
+
+$H_a: \mu \neq 0$
+
+```{r t test}
+
+tt <- t.test(model_1$residuals)
+
+tt
+
+```
+
+As we can see from this output, the p-value equals 1 meaning that the test has failed to reject the null hypothesis and the mean of the residuals in *model_1* is zero.
+
+**Homoscedasticity**: Variance of the error term is constant. If this is violated then the standard errors are biased and we cannot trust their products, the p-values. To test this, we look at a Scale-Location Plot where we expect to see no discernible pattern if the model's residuals have a constant variance. The plot itself is a visualisation of the spread of residuals over the range of predictors.
+
+I will plot a graph below which proves that my model has constant variance in $\mu$.
+
+**No correlation in errors**: Given a correlation between two x values, $x_{i}$ and $x_{j}$ $(i \neq j)$ there is no correlation in $u_{i}$ and $u_{j}$. If this isn't the case then standard errors are biased and p-values cannot be trusted. This is given by the equation:
+
+$cov(u_{i}, u_{j}|x_{i}, x_{j}) = 0$
+
+This is also proved by the Residuals vs Fitted Plot I have created above when testing linearity. There is no pattern in the residuals and so we can safely safe that there is no correlation in errors.
+
+**n >> b**: This states that the number of observations, *n*, must be larger than the number of parameters, *b*, in the model. If this is not the case then we are unable to properly observe even highly significant relationships between variables.
+
+```{r n>b test}
+
+nrow(bes17_test) > (ncol(bes17_test)-1)
+
+```
+
+A simple calculation shows that this is satisfied.
+
+**The Independent Variable(s) must vary**: You cannot have a homogeneous sample as you will be unable to describe the variance in the dependent variable. 
+
+I have shown the variation of my chosen independent variables in my histograms above.
+
+**Multicollinearity**: My chosen variables cannot be strongly correlated or colinear. If this is violated there is an issue of share variance, this is where you are unable to associate an effect to a specific variable. If you are unable to interpret the model then it loses its interpretability and therefore its utility.
+
+This was an issue I originally faced with my variables as there was a 0.973 correlation between *Con15* and *Con10* which led to a 0.946 shared variance. To overcome this I omitted *Con10* from the model. Had I not actioned this then the standard errors would be much larger on both variables leading to larger confidence intervals and a confused model.
+
+**Specification Bias**: There is an issue of whether I have chosen the correct variables or omitted a variable from the model which held high explanatory power that has been wrongly associated with another variable. 
+
+When I present my alternative model I will use an F-test to compare the two models ability to explain the *Con17* variable. The formula for the F-Test is:
+
+$F = \frac{(R^{2}_{new} - R^{2}_{old})/number\,of\,new\,regressors}{(1- R^{2}_{new})/df_{new}}$
+
+#### Diagnostic Visualisations for Model 1 {-}
+
+```{r Diagnostic Visualisations for mod 1, warning = F, message = F}
+
+diagnosticsViz <- function(mod){
+
+  grid.arrange(
+
+# Residuals vs Fitted
+
+ggplot2:: ggplot(mod, aes(mod$fitted.values, mod$residuals)) +
+  geom_point(col = "#0087dc", na.rm = T) +
+  geom_smooth(method='lm', formula = y~x, colour = "Black") +
+  ggtitle("Residuals vs Fitted") +
+  xlab("Fitted Values") +
+  ylab("Residuals"),
+  
+# Scale Location Plot
+
+ggplot2:: ggplot(mod, aes(mod$fitted.values, sqrt(abs(.stdresid)))) +
+  geom_point(col = "#0087dc", na.rm=TRUE) +
+  stat_smooth(method="loess", col = "Black" ,na.rm = TRUE) + 
+  ggtitle("Scale-Location") +
+  xlab("Fitted Value") +
+  ylab(expression(sqrt("|Standardized residuals|"))),
+
+# QQ-Plot
+
+ggplot2::qplot(sample = mod$residuals) +
+  stat_qq(col = "#0087dc", na.rm = T) +
+  stat_qq_line(col = "Black", size = 1) +
+  xlab("Theoretical Quantiles") +
+  ylab("Standardized Residuals") +
+  ggtitle("Normal Q-Q"),
+
+# Cook's Distance
+
+ggplot2:: ggplot(fortify(mod), aes(.hat, .stdresid)) +
+  geom_point(col = "#0087dc", na.rm=TRUE) +
+  stat_smooth(method="loess", col = "Black" ,na.rm = TRUE) +
+  xlab("Leverage") +
+  ylab("Standardized Residuals") +
+  ggtitle("Cook's Distance"),
+
+    ncol=2, nrow = 2
+  ) 
+  
+}
+
+diagnosticsViz(model_1)
+
+```
+
+This can be made easier with Base R's *plot* function but as a personal fan of *ggplot2* and visualisations I've decided to make my own visualisations. 
+
+**Top left**: *Residuals vs Fitted* shows me that the model is linear in parameters (basically a tick-box exercise to prove that in agrees with the underlying assumptions of linear regression) This tells me that there is no pattern in the residuals and that my model is not fundamentally wrong.
+
+**Top Right**: *Scale-Location* shows me the variance of the error term is constant (Homoscedastic). If this is violated then the standard errors are biased and we cannot trust their products, the p-values. There is no discernible pattern if the model’s residuals have a constant variance. The plot itself is a visualisation of the spread of residuals over the range of predictors.
+
+**Bottom Left**: *Normal Q-Q* shows me the assumption of normality is satisfied where the residuals in the model must be normally distributed $N \sim (0,\sigma^{2})$. As the residuals are consistently close to the line and therefore that the calculated standard errors and their respective p-values can be trusted.
+
+**Bottom Right**: *Cook's Distance* ss a measure of outliers, it is the scaled change in fitted values. It shows the influence of each observation on the fitted response values ($\hat Y$).
+
+From these trusted figures I can produce a 95% confidence interval for each of the values, 'this is an interval that contains the true value $\beta_{i}$ in 95% of all samples' (@hanck_econometrics_2019).
+
+The formula is: 
+
+$CI(\beta_{i}) = [\hat{\beta_{i}} - 1.96 \times SE{\hat{\beta_{i}}}, \hat{\beta_{i}} + 1.96 \times SE{\hat{\beta_{i}}}]$
+
+1.96 is used to multiply the standard error because in a z-table the probability of getting a z-score below -1.96 is 2.5% and getting above 1.96 is also 2.5%. When added together this shows that our z-score must be between [-1.96,1.96] to achieve a 95% confidence interval.
+
+```{r model 1 95pc}
+
+model_1_ci <- summary(model_1)$coefficients %>%
+  dplyr:: as_tibble(rownames = c("Variables")) %>%
+  dplyr:: mutate(CI_95_Lower = Estimate - 1.96*(`Std. Error`),
+                 CI_95_Upper = Estimate + 1.96*(`Std. Error`)) %>%
+  dplyr:: select(Variables, Estimate, CI_95_Lower, CI_95_Upper)
+
+model_1_ci
+
+```
+
+This table shows the calculated 95% confidence intervals for *model_1*, within the *CI_95_Lower* and *CI_95_Upper* of the variables. There is a 95% chance that each interval contains their respective population mean. Due to the high significance (from the low standard errors) of the two independent variables the range between the lower and upper bound is very narrow. 
+
+## Model 2 {-}
+
+In my second model, I propose I introduce a qualitative variable *BrexitYes*, I have calculated this such that when *leaveHanretty* is greater than 50% then *BrexitYes* equals 1 one with the constituency voted remain being the baseline. This variable will also interact with *c11EthnicityWhite*. 
+
+I believe this model is an improvement on the first as we can see whether the Brexit verdict in each constituency effects the explanatory power of *c11EthnicityWhite* and the intercept.
+
+```{r hist BrexitYes, echo = F}
+
+bes17 <- bes17 %>%
+  dplyr:: mutate(BrexitYes = ifelse(leaveHanretty > 50, "Yes","No"))
+
+  wrapR <- function(x, ...) {
+    
+  paste(strwrap(x, ...), collapse = "\n")
+  
+    }
+
+ggplot2:: ggplot(bes17, aes(BrexitYes)) +
+  geom_bar(fill = "#0087dc") +
+  ggtitle(wrapR("Constituencies where the Leave vote won the majority in 2016 (Hanretty)", 50))
+  
+bes17 <- bes17 %>%
+  dplyr:: mutate(BrexitYes = ifelse(BrexitYes =="Yes",1,0))
+
+```
+
+```{r Cor Table 2, echo =F, message = F , warning = F}
+
+bes17_cor2 <- cor(bes17[, c("Con15", "c11EthnicityWhite", "BrexitYes")], use = "complete.obs")
+
+round(bes17_cor2, 3)
+
+```
+
+```{r SV Table 2, echo = F, message = F , warning = F}
+
+bes17_sv2 <- bes17_cor2*bes17_cor2
+
+bes17_sv2
+
+```
+
+The correlation and shared variance tables show us that our variables satisfy the multicolinearity assumption and the model as the scores are low.
+
+```{r model 2,message = F, warning = F}
+
+model_2 <- lm(data = bes17, formula = Con17 ~ Con15 +  c11EthnicityWhite + BrexitYes + BrexitYes*c11EthnicityWhite)
+
+stargazer(model_2,
+          type = "text",
+          title = "OLS Regression Results for model 2",
+          covariate.labels = c("Con15",
+                                "c11EthnicityWhite",
+                                "BrexitYes",
+                                "BrexitYes*c11EthnicityWhite",
+                                "Intercept"),
+          out = "table2.text")
+
+```
+
+```{r Diagnostic Visualisations for mod 2, echo=F, , message = F , warning = F}
+
+diagnosticsViz(model_2)
+
+```
+
+These plots show that the new model also satisfies the assumptions and so can be fundamentally trusted.
+
+```{r model 2 95,echo = F, message = F , warning = F}
+
+model_2_ci <- summary(model_2)$coefficients %>%
+  dplyr:: as_tibble(rownames = c("Variables")) %>%
+  dplyr:: mutate(CI_95_Lower = Estimate - 1.96*(`Std. Error`),
+                 CI_95_Upper = Estimate + 1.96*(`Std. Error`))%>%             
+  dplyr:: select(Variables, Estimate, CI_95_Lower, CI_95_Upper)
+
+model_2_ci
+
+```
+
+The new model shows us a slightly higher r-squared value, thus means that the addition of *BrexitYes* has helped to explain the variance of our dependent term, *Con17*. All the coefficients are significant meaning that it is appropriate to interpret all of them.
+
+This model predicts that a 1 percentage point improvement in Conservative 2015 vote share increases the 2017 Conservative vote share by 0.818 percentage points. A 1 percentage point rise in constituents with white ethnicity increases the 2017 Conservative vote share by 0.220 percentage points, if that constituency also voted to leave the EU in 2016 then this coefficient falls to 0.145. If all independent variables were zero, then we expect the Conservative 2017 vote share to be -9.262, as *Con17* $\in [0,100]$ they *Con17* would be 0. *Con17* would be expected to be 1.416 if the constituency's majority vote was to leave the EU.
+
+Like *model 1*, the 95% confidence intervals are small which is promosing for our model's reliability.
+
+Considering the r-squared term from our first and second model we can see that the second model has more explanatory power however I will run an F-test in order to prove the superior model.
+
+```{r ANOVA, warning = F, message = F}
+
+anova(model_1, model_2)
+
+```
+
+The result shows a DF of 2 (indicating that the more complex model has two additional parameters), and a very small p-value (2.2e-16). This means that adding the *BrexitYes* and *BrexitYes* $\times$ *c11EthnicityWhite* to the model did lead to a significantly improved fit over *model 1*.
+
+# Conclusion {-}
+
+Both models have shown a strong and significant correlation between *Con15* and *Con17*, proving $H_1$ and *c11EthnicityWhite* and *Con17*, proving $H_2$ and that *Con15* has a larger effect on *Con17* than *c11EthnicityWhite*, proving $H_3$. 
+
+I would consider using *model 2* due to its exceptionally high r-squared value with the latter model explaining 92.8% for the variance in *Con17*. My other point is that the results match those run in various other experiments, 'the Labour party has traditionally received the lion’s share of votes from ethnic minorities' (@martin_ethnic_2017). This suggests that our finding that constituencies with higher white populations are more likely to vote conservative is accurate. It logically follows that *c11EthnicityWhite* plays a smaller part in explaining variance than *Con15* which I have argued in my introduction.
+
+One of the largest issues with this model is that it is built from aggregated data. This means that it can produce inaccurate inferences, constituency aggregations cannot control for individual-level determinants for example, this is an important concern known as the ecological fallacy. Statistically, a correlation tends to be larger when an association is assessed at the group level than when it is assessed at the individual level. This was first highlighted by W.S Robinson who was quoted saying his 1950s article 'provides a definite answer as to whether ecological correlations can validly be used as substitutes for individual correlations. They cannot.
+
+What could have been beneficial to consider is whether the race of the conservative candidate, *ConPPCrace15*, would have affected the explanatory power of *c11EthnicityWhite* on *Con17*. Considering Labour's 2017 tactic where '83% of Labour’s BME candidates were in seats with higher-than-average ethnic diversity' (@martin_ethnic_2017) there is strong evidence that this variable plays a role in the verdict.
+
+There is seemingly a relationship between homeownership and race in the UK where 'most ethnic minority households (including White ethnic minorities) were less likely to be in homeownership than White British households'(@gov.uk_home_nodate). There is also an eleven year difference in the average age of white ethnicity and black ethnicity UK citizens (@gov.uk_age_nodate), both these variables are correlated to *Con17* says data from @akehurst_housing_nodate and @curtis_how_nodate. There could be an issue of unobserved heterogeneity which could have a major impact on results if the model doesn't control for these variables, to find whether the *c11EthnicityWhite* variable is truly causal we must include new variables.
+
+Overall I believe that my models hold limited use in explaining the Conservative vote share in 2017. This is due to not building the models from granular data as well as controlling for multiple more variables it is difficult to definitively and confidently derive conclusions from my models. 
+
+## Bibliography
+
+Akehurst, Steve. 2019. “Housing and the 2017 Election: What the Numbers Say Shelter.” Accessed November 23. https://blog.shelter.org.uk/2017/06/housing-and-the-2017-election-what-the-numbers-say/.
+
+Alec, Tyson. 2016. “Behind Trump’s Victory: Divisions by Race, Gender, Education,” November. https://www.pewresearch.org/fact-tank/2016/11/09/behind-trumps-victory-divisions-by-race-gender-education/.
+
+Baker, Carl, Oliver Hawkins, Lukas Audickas, Alex Bate, Richard Cracknell, Vyara Apostolova, Noel Dempsey, Roderick McInnes, Tom Rutherford, and Elise Uberoi. 2019. “General Election 2017: Full Results and Analysis,” January. https://researchbriefings.parliament.uk/ResearchBriefing/Summary/CBP-7979.
+
+Cowley, Philip, and Dennis Kavanagh. 2016. The British General Election of 2015. British General Election Series. Palgrave Macmillan UK. doi:10.1057/9781137366115.
+
+———. 2018. The British General Election of 2017. British General Election Series. Palgrave Macmillan. doi:10.1007/978-3-319-95936-8.
+
+Cracknell, Richard, Nick Duckworth, Oliver Hawkins, and John Wood. 2014. “Census 2011 Constituency Results.” House of Commons.
+
+Curtis, Chris. 2019. “How Britain Voted at the 2017 General Election YouGov.” Accessed November 23. https://yougov.co.uk/topics/politics/articles-reports/2017/06/13/how-britain-voted-2017-general-election.
+
+“Ecological Fallacy Epidemiology.” 2019. Encyclopedia Britannica. Accessed November 23. https://www.britannica.com/science/ecological-fallacy.
+
+Gov.UK. 2019a. “Age Groups.” Accessed November 23. https://www.ethnicity-facts-figures.service.gov.uk/uk-population-by-ethnicity/demographics/age-groups/latest#average-age-by-ethnicity.
+
+———. 2019b. “Home Ownership.” Accessed November 23. https://www.ethnicity-facts-figures.service.gov.uk/housing/owning-and-renting/home-ownership/latest#by-ethnicity.
+
+Hanck, Christoph, Martin Arnold, Alexander Gerber, and Martin Schmelzer. 2019. “Econometrics with R.” Introduction to Econometrics with R. https://www.econometrics-with-r.org/.
+
+Hanretty, Chris. 2017. “Areal Interpolation and the UK’s Referendum on EU Membership.” Journal of Elections, Public Opinion and Parties 27 (4): 466–83. doi:10.1080/17457289.2017.1287081.
+
+James, Gareth, Daniela Witten, Trevor Hastie, and Robert Tibshirani. 2013. An Introduction to Statistical Learning. Vol. 103. Springer Texts in Statistics. New York, NY: Springer New York. doi:10.1007/978-1-4614-7138-7.
+
+Khan, Omar, Kjartan Páll Sveinsson, and Runnymede Trust. 2015. Race and Elections.
+
+Martin, Nicole, and Omar Khan. 2017. “Ethnic Minorities at the 2017 British General Election,” 4.
+
+McNeese, Bill. 2008. “Are the Skewness and Kurtosis Useful Statistics?” https://www.spcforexcel.com/knowledge/basic-statistics/are-skewness-and-kurtosis-useful-statistics#skewness.
+
+Robinson, W. S. 1950. “Ecological Correlations and the Behavior of Individuals.” American Sociological Review 15 (3): 351–57. doi:10.2307/2087176.
+
+tutor2u. 2019. “Safe Seats.” Text/html. Tutor2u. https://www.tutor2u.net/politics/reference/safe-seats.
+
+Westfall, Peter H. 2014. “Kurtosis as Peakedness, 1905 – 2014. R.I.P.” The American Statistician 68 (3): 191–95. doi:10.1080/00031305.2014.917055.
+
+... and of course many StackOverflow articles
