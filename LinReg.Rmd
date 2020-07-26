@@ -1,0 +1,62 @@
+---
+title: "LinReg"
+author: "Greg Cooke"
+date: "26/07/2020"
+output:
+  bookdown::html_document2: default
+---
+
+# Introduction
+
+Linear Regression is a very simple statistical tool to find an estimate for a quantitative response variable, *Y*, using quantitative or qualitative predictors *X*. With regards to this tool we expect the model to have a high bias as, in most cases, there are not linear relationships in the real world but this does mean there is low variance due to it's low flexibility as the model is rigid. What this means the tool is better for  inference, as opposed to prediction as we can see the relationship between variables.
+
+In this case I will be using the BES 2017 dataset to show the utility of Linear Regression.
+
+```{r Setup, message = FALSE, include = FALSE, echo = F}
+
+library(tidyverse)
+library(rlang)
+library(reshape2)
+library(tidyselect)
+library(lmtest)
+library(ggpubr)
+library(ggrepel) 
+library(stargazer)
+library(e1071)
+library(broom)
+
+```
+
+```{r}
+
+bes17 <- readRDS(paste0(getwd(), "/bes17.rds"))
+
+```
+
+I will be looking at *Con17* (baker_general_2019) as my dependent variable and *Con15* and *c11EthnicityWhite* as my independent variables. The chosen variables are all continuous, ratio variables based between 0 and 100 as they represent percentages. This means there is no requirement to standardise the data as they are all based on the same measurement. *Con17* and *Con15* are the Conservative vote shares for the years 2017, 2015 and 2010 respectively whereas *c11EthnicityWhite* is the percentage of the constituents whose ethnicity is white.
+
+```{r Selection, message = FALSE}
+
+bes17_test <- bes17 %>%
+  dplyr:: select(Con17, Con15, c11EthnicityWhite) 
+
+summary(bes17_test)
+
+```
+
+My first model is *Con15's* effect on *Con17*.
+
+```{r model 1, warning=F}
+
+model_1 <- lm(data = bes17_test, formula = Con17 ~ Con15)
+
+stargazer(model_1,
+          type = "text",
+          title = "OLS Regression Results for model 1",
+          covariate.labels = c("Con15",
+                               "Intercept"),
+          out = "table1.text")
+
+```
+
+As we can see from these results, there is a strong relationship between 
