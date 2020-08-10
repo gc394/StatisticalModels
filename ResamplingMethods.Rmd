@@ -1,0 +1,64 @@
+---
+title: "Resampling Methods"
+author: "Greg Cooke"
+date: "10/08/2020"
+output: html_document
+---
+
+# Introduction {-}
+
+In the grand scheme of the data pipeline, one would look to perform resampling after creating models from the data. The objective of such activity is to obtain additional information about the model and estimate variability (or quantify confidence - however you want to put it).
+
+The two main processes in resampling are *cross-validation* and *bootstrapping*, a quick explanation:
+
+- *Cross-validation* is estimating the test error in order to measure the performance of the model (known as *model assesment*). You can use it to find the minimum point in estimated MSE.
+- *Bootstrapping* is estimating the accuracy of the parameters or the statistical learning method (SLM) itself.
+
+# Cross Validation {-}
+
+With any model, you need to train it and then test it (sorry for keeping it simple). To do so you need to split your available dataset into 2 segements, training and testing (again, sorry for being obvious) where the model is trained on the former set and the latter set is held out to find a *test error rate*. Doing this multiple times allows you to fit the data as accurately as possible. There are three methods I'm going to look at: *Validation Set Approach*, *Leave-One-Out Cross Validation* and *k-fold Cross Validation*.
+
+I'm going to use the famous *Auto* dataset (ripping straight from the ISLR package) with *recipes* package to create models and the *rsample* package to cross validate them - both can be found in the within the *tidymodels* ensemble.
+
+```{r, message = F}
+
+library(tidyverse)
+library(tidymodels)
+
+print(str_sort(unique(c(tidyverse_packages(), tidymodels_packages()))))
+
+```
+
+## Creating the model
+
+```{r}
+
+model <- lm(formula = Employed ~ GNP + Unemployed + Armed.Forces + Year, 
+            data = longley)
+
+```
+
+
+## Validation Set Approach
+
+This is the simplest out of the three approaches I'll be looking at. The idea here is to just create multiple random splits in the data with the standard aim of minimizing the MSE. For *n* observations $\frac{n}{2}$ will be in the training set and so (again, I promise it'll become more complicated later) $\frac{n}{2}$ will be in the testing set.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
