@@ -16,49 +16,307 @@ The two main processes in resampling are *cross-validation* and *bootstrapping*,
 
 # Cross Validation {-}
 
-With any model, you need to train it and then test it (sorry for keeping it simple). To do so you need to split your available dataset into 2 segements, training and testing (again, sorry for being obvious) where the model is trained on the former set and the latter set is held out to find a *test error rate*. Doing this multiple times allows you to fit the data as accurately as possible. There are three methods I'm going to look at: *Validation Set Approach*, *Leave-One-Out Cross Validation* and *k-fold Cross Validation*.
+With any model, you need to train it and then test it (sorry for keeping it simple). To do so you need to split your available dataset into 2 segments, training and testing (again, sorry for being obvious) where the model is trained on the former set and the latter set is held out to find a *test error rate*. Doing this multiple times allows you to fit the data as accurately as possible. There are three methods I'm going to look at: *Validation Set Approach*, *Leave-One-Out Cross Validation* and *k-Fold Cross Validation*.
 
-I'm going to use the famous *Auto* dataset (ripping straight from the ISLR package) with *recipes* package to create models and the *rsample* package to cross validate them - both can be found in the within the *tidymodels* ensemble.
+I'm going to use the famous *Auto* dataset (I'm ripping the idea straight from the ISLR package and book - thanks Gareth James, Daniela Witten, Trevor Hastie and Robert Tibshirani) with *recipes* package to create models and the *rsample* package to cross validate them - both can be found in the within the *tidymodels* ensemble.
 
-```{r, message = F}
+```{r, message = FALSE}
 
-library(tidyverse)
-library(tidymodels)
+library(ISLR)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(caret)
+library(rsample)
+library(purrr)
+library(plyr)
 
-print(str_sort(unique(c(tidyverse_packages(), tidymodels_packages()))))
-
-```
-
-## Creating the model
-
-```{r}
-
-model <- lm(formula = Employed ~ GNP + Unemployed + Armed.Forces + Year, 
-            data = longley)
+set.seed(123)
 
 ```
 
+As written in the book, there is some proof (shown below which I got from [here](https://www.andrew.cmu.edu/user/achoulde/95791/labs/Lab02_solutions.html#the-validtion-set-approach) that $horsepower^2$ is a better estimate of *mpg* than *horsepower* which creates the obvious question of whether $horsepower^3$, $horsepower^4$ etc leads to further improvements in explanatory power.
+
+ <center>
+
+```{r, echo = F, message = F, warning = F}
+
+ggplot(data = Auto, aes(x = horsepower, y = mpg)) +
+  geom_point() +
+  stat_smooth(method = "lm", aes(colour = "Linear Regression")) + 
+  stat_smooth(method = "lm", formula = y ~ poly(x, 2), aes(colour = "Quadratic Fit")) +
+  stat_smooth(method = "lm", formula = y ~ poly(x, 4), aes(colour = "Quartic Fit")) +
+  labs(x = "Horsepower",
+       y = "MPG",
+       title = "Horsepower on MPG using linear, quadratic and quarticlines")
+```
+
+</center>
 
 ## Validation Set Approach
 
 This is the simplest out of the three approaches I'll be looking at. The idea here is to just create multiple random splits in the data with the standard aim of minimizing the MSE. For *n* observations $\frac{n}{2}$ will be in the training set and so (again, I promise it'll become more complicated later) $\frac{n}{2}$ will be in the testing set.
 
+I have created a function to create the tables which will store the results of each method below.
+
+```{r}
+
+# Create Table Function
+
+tableCreatR <- function(c_list){
+  
+mse <- data.frame(matrix(ncol = length(c_list), 
+                         nrow = 0))
+    
+colnames(mse) <- c_list
+  
+return(mse)
+
+}
+
+```
+
+I'm sure my following code would have broken some unwritten R rules on nesting loops and I'm very happy to hear alternatives to this method but this following code shows how MSE is effected by powers on the *Horsepower* variable and I have used 10 separate (and random) splits in the data to create the graph below.
+
+```{r}
+
+mse_vsa <- tableCreatR(c_list = c("MSE_Estimate",
+                                  "Horsepower_Power",
+                                  "Fold",
+                                  "Time_Taken"))
+
+data_vsa <- list()
+
+for(y in 1:10){
+
+train <- sample(nrow(Auto), 0.5*nrow(Auto)) 
+
+for(x in 1:8){
+  
+t <- system.time({
+  
+model_vsa <- lm(mpg ~ poly(horsepower, x), 
+                data = Auto, 
+                subset = train)
+  
+})    
+
+mse_vsa[nrow(mse_vsa)+1,] <- c(with(Auto, mean((mpg - predict(model_vsa, Auto))[-train]^2)), #MSE
+                               x, # Power
+                               y, # Fold
+                               t[3]) # Time
+
+}
+
+}
+
+```
+
+What's a result without a visualization? Not much.
+
+<center>
+
+```{r,echo = FALSE}
+
+  ggplot(mse_vsa) + 
+  geom_line(aes(x = Horsepower_Power, 
+                y = MSE_Estimate, 
+                colour = as.factor(Fold))) +
+  labs(y = "Mean Squared Error",
+       title = "Horsepower_Power on the MSE with 10-fold VSA") +
+  scale_colour_discrete("Fold") +
+  scale_x_continuous("Power", 
+                     labels = as.character(mse_vsa$Horsepower_Power), 
+                     breaks = mse_vsa$Horsepower_Power)
+
+```
+
+</center>
+
+What this plot shows is the variability in MSE when using a Validation Set Approach. This is due to the large changes in the observations that exist in each set when a new sample is taken. The other issue is that statistical models perform worse when fewer observations are used (in this case, 50% of the possible sample) which means the MSE is very likely to be exaggerated (or *overestimated*).
+
+## Leave-One-Out Cross Validation
+
+Considering VSA's criticisms, LOOCV overcomes them in its methodology. Like VSA, the data (size *n*) is split into
+training and testing but, in this case, the training set is size *n-1* which aims to predict the singular dependent variable that has been excluded from the testing set. This is repeated *n* times until all datum have been used as the test variable. Unlike VSA, once the row has been used in the test set it will not be used again.
+
+The $MSE_{i}$ is unbiased as it is being trained on *n-1* observations (almost the entire dataset), which means by following the bias-variance tradeoff, it has high variance. This can be seen because it is based off a single, test observation. The LOOCV estimate for MSE is:
+
+<center>
+
+$CV_{(n)} = \frac{1}{n}\sum^{n}_{i=1}MSE_{i}$
+
+</center>
+
+For this we will be using the *caret* package in the approach as *rsample*'s version doesn't work as well from some research. (I have borrowed code from [here](https://stackoverflow.com/questions/41742777/using-poly-function-within-training-model-in-caret-package-resulting-in-datafra))
+
+```{r}
+
+mse_loocv <- tableCreatR(c_list = c("MSE_Estimate",
+                                    "Horsepower_Power",
+                                    "Time_Taken"))
+
+for (x in 1:8){
+
+t <- system.time({  
+  
+model_loocv <- train(as.formula(bquote(mpg ~ poly(horsepower, .(x)))), 
+                     method = "lm", 
+                     data = Auto, 
+                     trControl = trainControl(method = "LOOCV"))
+
+})
+
+mse_loocv[nrow(mse_loocv)+1,] <- c(model_loocv$results$RMSE^2,
+                                   x,
+                                   t[3])
+
+}
+
+```
+
+Let's visualise this:
+
+<center>
+
+```{r,echo = FALSE}
+
+  ggplot(mse_loocv) + 
+  geom_line(aes(x = Horsepower_Power, 
+                y = MSE_Estimate)) +
+  labs(y = "Mean Squared Error",
+       title = "Horsepower_Power on the MSE with LOOCV") +
+  scale_x_continuous("Power", 
+                     labels = as.character(mse_loocv$Horsepower_Power), 
+                     breaks = mse_loocv$Horsepower_Power)
+
+```
+
+</center>
+
+So it solves the VSA problems as training with *n-1* observations almost eradicates the problem of overestimation of errors and there is no variance from training/testing sets as it's done *n* times! Another fantastic advantage is that it can be used with any predictive model from logistic regression to LDA. Great news right? Well there is a catch...
+
+*Auto* is quite a small dataset with only 392 rows and the model I'm running is a simple regression so it runs in very little time at all. There is serious potential that *LOOCV* becomes computationally very expensive as n moves towards the extremely large or the model becomes more complex.
+
+## k-Fold Cross Validation
+
+The easiest way to put it is that the obsverations are split into *k* sets (*LOOCV* is sort of a version of *k-fold CV* where *k=n*). *k-1* of these sets are used for training and the process is repeated *k* times. In the *rsample* package the function is called *vfold_cv*, just trying to keep you on your toes with that one I assume.
+
+The obvious advantage here is computational (comparative to *LOOCV* at least). 
+
+```{r}
+
+mse_kfcv <- tableCreatR(c_list =  c("MSE_Estimate",
+                                   "Horsepower_Power",
+                                   "k_folds",
+                                   "Time_Taken"))
+
+for (k in seq(from = 5, 
+              to = 20, 
+              by = 5)){
+
+data_kfcv <-  rsample::vfold_cv(Auto,
+                                k)
+
+ for (x in 1:8){
+
+t <- system.time({   
+   
+  model_kfcv <- map(data_kfcv$splits, ~ lm(mpg ~ poly(horsepower, x),
+                                           data = .))
+
+})  
+  
+  mse_kfcv[nrow(mse_kfcv)+1,] <- c(mean(model_kfcv[[1]]$residuals^2, na.rm = T),
+                                 x,
+                                 k,
+                                 t[3])
+
+               }
+
+}
+
+```
+
+<center>
+
+```{r,echo = FALSE}
+
+  ggplot(mse_kfcv) + 
+  geom_line(aes(x = Horsepower_Power, 
+                y = MSE_Estimate,
+                colour = as.factor(k_folds))) +
+  labs(x = "Power",
+       y = "Mean Squared Error",
+       title = "Horsepower_Power on the MSE with k-Fold Cross Validation") +
+  scale_colour_discrete("k-Folds") +
+  scale_x_continuous("Power", 
+                     labels = as.character(mse_kfcv$Horsepower_Power), 
+                     breaks = mse_kfcv$Horsepower_Power)
 
 
+```
 
+</center>
 
+*k-Fold* is a better estimate of test error rate than *LOOCV* which seems bizarre from a simple glance. Consider again the *bias-variance* tradeoff, there is a high bias in the *VSA* approach because it only uses $\frac{n}{2}$ observations to train the model and there is little/no bias in *LOOCV* because it uses *n-1* observations with *k-Fold* sitting between the 2 with regards to bias reduction.
 
+Remembering that *variance* is the amount that $\hat{f}$ would change if we used a different training data set, *LOOCV* has a higher variance as it averages the output of *n*, almost identical and positively correlated models. The mean of many highly correlated models quantities has a high variance. As $k < n$, k models have less of a correlation with each other and so do not suffer as badly from this variance issue. Being in the middle of *VSA* and *LOOCV* they neither suffer from overly high bias or overly high variance.
 
+## Computational Differences
 
+So I've mentioned a few times about the computational differences between methods and while I show my results through using the *system.time()* base function I want to stress that I have no doubt there are more efficient ways to code the various methods I have shown above and this is only from my findings.
 
+<center>
 
+```{r, echo = F, message = F, warning = F}
 
+# Tidy to focus on time
 
+mse_kfcv_time <- mse_kfcv %>%
+  dplyr:: filter(k_folds %in% c(5,20)) %>%
+  tidyr:: spread(k_folds, Time_Taken) %>%
+  dplyr:: rename(Five_kFold = `5`,
+                 Twenty_kFold = `20`) %>%
+  dplyr:: group_by(Horsepower_Power, 
+                    .groups = 'drop') %>%
+  dplyr:: summarise(Five_kFold = sum(Five_kFold, na.rm = T),
+                    Twenty_kFold = sum(Twenty_kFold, na.rm = T))
+  
+mse_vsa_time <- mse_vsa %>%
+  dplyr:: group_by(Horsepower_Power) %>%
+  dplyr:: summarise(`VSA (x10)` = sum(Time_Taken, na.rm = T), 
+                    .groups = 'drop')
 
+mse_loocv_time <- mse_loocv %>%
+  dplyr:: select(-MSE_Estimate) %>%
+  dplyr:: rename(LOOCV = Time_Taken)
 
+# Join all together
 
+mse_total <- base:: Reduce(function(x,y) merge(x,y,
+                                        by="Horsepower_Power",
+                                        all=TRUE),
+                        list(mse_vsa_time,
+                            mse_loocv_time,
+                            mse_kfcv_time)) %>%
+  tidyr:: gather(Method, Time, -Horsepower_Power)
 
+# Viz
 
+ggplot2:: ggplot(mse_total, aes(x = Horsepower_Power,
+                      y = Time,
+                      fill = Method)) +
+  geom_bar(stat='identity',
+           position=position_dodge()) +
+  scale_x_continuous("Horsepower_Power", 
+                     labels = as.character(mse_total$Horsepower_Power), 
+                     breaks = mse_total$Horsepower_Power) +
+  labs(x = "Power",
+       y = "Time (s)",
+       title = "Difference in computing time for different CV method")
 
+```
 
+</center>
 
