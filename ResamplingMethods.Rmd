@@ -31,7 +31,9 @@ library(rsample)
 library(purrr)
 library(plyr)
 library(boot)
-require(gridExtra)
+library(gridExtra)
+library(stargazer)
+
 
 set.seed(123)
 
@@ -387,17 +389,17 @@ What this shows us is that using the original dataset, 1000 bootstrapped sample 
 t <- as.data.frame(boots$t)
 
 h <- ggplot(t, aes(x = V1)) +
-  geom_histogram(colour = "black", binwidth = 0.02) + 
+  geom_histogram(colour = "Black", binwidth = 0.02) + 
   geom_vline(data = data.frame(measurement = "True wA",
                                value = weightFindR(Portfolio, 1:100)), 
-             aes(xintercept = value, color = measurement), size = 1) +
+             aes(xintercept = value, color = measurement, fill = "Red"), size = 1) +
   labs(x = "t*",
        y = "Count",
        title = "Histogram")
 
 q <- ggplot(t, aes(sample = V1)) +
-  geom_qq() +
-  geom_qq_line() +
+  geom_qq(colour = "Black") +
+  geom_qq_line(colour = "Red") +
   labs(x = "Quantiles of Standard Normal",
        y = "t*",
        title = "Q-Q Plot")
@@ -410,35 +412,89 @@ The Histogram shows us the distribution of the parameter estimates that we've pr
 
 </center>
 
-So now that we've shown we can find fairly accurate estimates for variables using this technique I'm now going to try and do the same with a simple linear model. Let's go back to the model we were looking act regarding cross-validation, $mpg \sim horsepower + horsepower^2$ (we're using the variation that gave the lowest MSE according to *LOOCV*). Unsurprisingly, this [page](https://www.tidymodels.org/learn/statistics/bootstrap/) really helped me with understanding writing the code.
+So now that we've shown we can find fairly accurate estimates for variables using this technique I'm now going to try and do the same with a NLS (non-linear least squares) model. I'm using this type of model because most articles on the topic suggest this is far more useful to highlight the usefulness of bootstrapping. Let's go back to the dataset we were looking act regarding cross-validation except the equation will now be: $mpg \sim c * horsepower^z$. Unsurprisingly, [this page](https://www.tidymodels.org/learn/statistics/bootstrap/) really helped me with understanding writing the code.
+
+<center>
+
+```{r, warning=F, echo = F}
+
+nls_mod <- nls(mpg ~ c / horsepower ^ z, 
+               data = Auto,
+               start = c(c=0.8, z = 0.2))
+
+summary(nls_mod)
+
+```
+
+</center>
+
+Now that we can see correlation we can proceed with the bootstrapping.
 
 ```{r}
 
-boots2 <- bootstraps(Auto, times = 1000, apparent = TRUE)
+boots2 <- bootstraps(Auto, 
+                     times = 1000, 
+                     apparent = TRUE)
 
 modelFitR <- function(split) {
   
-lm(mpg ~ horsepower, data = analysis(split))
+nls(mpg ~ c / horsepower + z, 
+    analysis(split), 
+    start = c(c=0.8, z = 0.2))
 
 }
 
-coef_boot <- boots2 %>%
+model_boot2 <- boots2 %>%
   dplyr:: mutate(model = map(splits, modelFitR),
-                 coef = map(model, tidy)) %>%
+                 coef = map(model, tidy))
+
+coef_boot2 <- model_boot2 %>%
   tidyr:: unnest(coef)
 
-head(coef_boot,10)
+head(coef_boot2)
 
 ```
 
-From this we can graph confidence intervals and begin to really see the variability of the proposed parameter estimates.
+From this we can graph confidence intervals (I've chosen to use percentile but there are different options in the *RSample* package that can be seen [here](https://rsample.tidymodels.org/reference/int_pctl.html)) and begin to really see the variability of the proposed parameter estimates.
+
+<center>
+
+```{r, echo = F}
+
+p_ints <- int_pctl(model_boot2, coef)
+
+coef_boot2 %>%
+  ggplot(aes(x = estimate)) +
+  geom_histogram(bins = 30, col = "Black") +
+  facet_wrap(~ term, scales = "free_x") +
+  geom_vline(aes(xintercept = .lower), data = p_ints, col = "Red") +
+  geom_vline(aes(xintercept = .upper), data = p_ints, col = "Red")  +
+  labs(x = "Estimate",
+       y = "Count",
+       title = "Faceted Histograms of Variables")
+
+```
+
+</center>
+
+Finally I just want to visualise a sample of the bootstrapped points on the original dataset just to show another way of visualising the variability within coefficient estimates. We use *augment* in order to do this on a fitted line.
+
+<center>
 
 ```{r}
 
-
+aug_boot2 <- model_boot2 %>% 
+  sample_n(200) %>%
+  mutate(augmented = map(model, augment)) %>%
+  unnest(augmented)
+  
+ggplot(aug_boot2, aes(horsepower, mpg)) +
+  geom_line(aes(y = .fitted, group = id), alpha = 0.2, col = "Red") +
+  geom_point(col = "Black")
 
 ```
 
+So that is my work so far on resampling techniques! Hope this was some help!
 
 # Readings {-}
 
@@ -448,5 +504,3 @@ https://alison.rbind.io/post/2020-02-27-better-tidymodels/
 https://daviddalpiaz.github.io/r4sl/
 https://juliasilge.com/blog/intro-tidymodels/
 https://blog.methodsconsultants.com/posts/understanding-bootstrap-confidence-interval-output-from-the-r-boot-package/
-
-
