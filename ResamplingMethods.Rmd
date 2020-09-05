@@ -18,7 +18,7 @@ The two main processes in resampling are *cross-validation* and *bootstrapping*,
 
 With any model, you need to train it and then test it (sorry for keeping it simple). To do so you need to split your available dataset into 2 segments, training and testing (again, sorry for being obvious) where the model is trained on the former set and the latter set is held out to find a *test error rate*. Doing this multiple times allows you to fit the data as accurately as possible. There are three methods I'm going to look at: *Validation Set Approach*, *Leave-One-Out Cross Validation* and *k-Fold Cross Validation*.
 
-I'm going to use the famous *Auto* dataset (I'm ripping the idea straight from the ISLR package and book - thanks Gareth James, Daniela Witten, Trevor Hastie and Robert Tibshirani) with *recipes* package to create models and the *rsample* package to cross validate them - both can be found in the within the *tidymodels* ensemble.
+I'm going to use the famous *Auto* dataset (I'm ripping the idea straight from the [ISLR](https://faculty.marshall.usc.edu/gareth-james/ISL/ISLR%20Seventh%20Printing.pdf) package and book - thanks Gareth James, Daniela Witten, Trevor Hastie and Robert Tibshirani) with *recipes* package to create models and the *rsample* package to cross validate them - both can be found in the within the *tidymodels* ensemble.
 
 ```{r, message = FALSE}
 
@@ -32,8 +32,7 @@ library(purrr)
 library(plyr)
 library(boot)
 library(gridExtra)
-library(stargazer)
-
+library(broom)
 
 set.seed(123)
 
@@ -481,7 +480,7 @@ Finally I just want to visualise a sample of the bootstrapped points on the orig
 
 <center>
 
-```{r}
+```{r, echo = F}
 
 aug_boot2 <- model_boot2 %>% 
   sample_n(200) %>%
@@ -501,6 +500,9 @@ So that is my work so far on resampling techniques! Hope this was some help!
 I have already added links to a few pages where I have lifted code and edited it to fit my objectives, more indirectly those these pages have helped with my technical understanding and coding technique.
 
 https://alison.rbind.io/post/2020-02-27-better-tidymodels/
+
 https://daviddalpiaz.github.io/r4sl/
+
 https://juliasilge.com/blog/intro-tidymodels/
+
 https://blog.methodsconsultants.com/posts/understanding-bootstrap-confidence-interval-output-from-the-r-boot-package/
