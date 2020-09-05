@@ -30,6 +30,8 @@ library(caret)
 library(rsample)
 library(purrr)
 library(plyr)
+library(boot)
+require(gridExtra)
 
 set.seed(123)
 
@@ -48,7 +50,7 @@ ggplot(data = Auto, aes(x = horsepower, y = mpg)) +
   stat_smooth(method = "lm", formula = y ~ poly(x, 4), aes(colour = "Quartic Fit")) +
   labs(x = "Horsepower",
        y = "MPG",
-       title = "Horsepower on MPG using linear, quadratic and quarticlines")
+       title = "Horsepower on MPG using linear, quadratic and quartic lines")
 ```
 
 </center>
@@ -319,4 +321,132 @@ ggplot2:: ggplot(mse_total, aes(x = Horsepower_Power,
 ```
 
 </center>
+
+As expected, the *LOOCV* technique is by far the most computationally expensive - perhaps exageratted by using a different package but still the results are significant. We did show that it did produce the best MSE though, it's fair to say that payoff and compromise are littered throughout Data Science functionality.
+
+# Bootstrapping {-}
+
+So moving on to *bootstrapping*, as aforementioned the objective of this technique is to find the level of accuracy associated with a parameter or SLM itself. It creates mulitple samples out of your dataset and replaces each time meaning there may be duplications (this isn't an issue due to the large amount of samples you crate). Bootstrapping doesn't assume any shape of your data which means you can use it for a wider range of distributions and smaller sample sizes. It's very transferrable and can be used on a range of SLMs, obviously we see standard errors from some models automatically but in the cases of more flexible (and thus variable models) this can be harder to obtain without bootstrapping.
+
+Again, like ISLR, we are going to use the *Portfolio* dataset from the *ISLR* package.
+
+The problem is *Minimum Variance Two Asset Portfolio* of assets *A* and *B* and just because I get a kick out of it I'll do some solving to produce the mathematical problem below:
+
+<center>
+
+$w_B =  1 - w_A$ (1)
+
+The return is: $E[R_P] = w_AE[R_A] + w_BE[R_B]$ (2) 
+
+The variance is: $Var[R_P] = w_A^2 \sigma_{A}^2+w_B^2\sigma_{B}^2+2w_1w_2\sigma_{AB}$ (3)
+
+Substituting (1) into (3): $Var[R_P] = \sigma_{B}^2 + 2w_A(\sigma_{AB} - \sigma_{B}^2) + w_A^2(\sigma_{A}^2 +\sigma^2_B-2\sigma_{AB})$ (4)
+
+The derivative of (4) with respect to $w_A$ is: $\frac{dVar[R_P]}{dw_A} = 2w_{A}(\sigma_A^2 + \sigma_B^2 - 2\sigma_{AB}) + 2(\sigma_{A,B} - \sigma_{A}^2)$ (5)
+
+Set (5) equal to zero: $w_A = \frac{\sigma_{B}^2 - \sigma_{AB}}{\sigma_{A}^2 +\sigma^2_B-2\sigma_{AB}}$
+
+</center>
+
+The aim of the following is now to find an estimate for $w_A$ (and thus $w_B$) from our dataset. I have created a function below which finds our variable of interest.
+
+```{r}
+
+weightFindR <- function(df, ind){
+  
+  var_x <- var(df$X[ind])
+  var_y <- var(df$Y[ind])
+  cov_xy <- cov(df$X[ind], df$Y[ind])
+  
+  wA <- (var_y - cov_xy)/(var_x + var_y - 2*(cov_xy))
+    
+  return(wA)
+  
+}
+
+```
+
+Bootstrapping is repeatedly obtaining distinct datasets by continously sampling from the original dataset (being *Portfolio* in this case). The sampling is performed with replacement which means you can have the same observation more than once in a bootstrapped dataset.
+
+I'm using the *boot* function from its eponymously named package for this example and then I will use *rsample*'s *bootstraps* function after for a different example.
+
+```{r}
+
+boots <- boot(Portfolio, weightFindR, R=1000)
+
+boots 
+
+```
+
+What this shows us is that using the original dataset, 1000 bootstrapped sample sets have created an estimated value for $w_A$ ($\hat{w_A}$) at 0.5758 with a standard error error $SE(\hat{w_A})$ at 0.0937. Below there are plots of the estimated coeffients and how they are spread out. I decided to plot it using ggplot for aethestic reasons (and also it's a bit of a fun challenge converting base plots to ggplots), it gave us:
+
+<center>
+
+```{r, echo = F}
+
+t <- as.data.frame(boots$t)
+
+h <- ggplot(t, aes(x = V1)) +
+  geom_histogram(colour = "black", binwidth = 0.02) + 
+  geom_vline(data = data.frame(measurement = "True wA",
+                               value = weightFindR(Portfolio, 1:100)), 
+             aes(xintercept = value, color = measurement), size = 1) +
+  labs(x = "t*",
+       y = "Count",
+       title = "Histogram")
+
+q <- ggplot(t, aes(sample = V1)) +
+  geom_qq() +
+  geom_qq_line() +
+  labs(x = "Quantiles of Standard Normal",
+       y = "t*",
+       title = "Q-Q Plot")
+
+grid.arrange(h, q, ncol=2, top="Bootstrap Graphs for Portfolio")
+
+```
+
+The Histogram shows us the distribution of the parameter estimates that we've produced through the bootstrap. The QQ plot shows us how normal that distribution is (a really good article on QQplots is [here](https://data.library.virginia.edu/understanding-q-q-plots/)).
+
+</center>
+
+So now that we've shown we can find fairly accurate estimates for variables using this technique I'm now going to try and do the same with a simple linear model. Let's go back to the model we were looking act regarding cross-validation, $mpg \sim horsepower + horsepower^2$ (we're using the variation that gave the lowest MSE according to *LOOCV*). Unsurprisingly, this [page](https://www.tidymodels.org/learn/statistics/bootstrap/) really helped me with understanding writing the code.
+
+```{r}
+
+boots2 <- bootstraps(Auto, times = 1000, apparent = TRUE)
+
+modelFitR <- function(split) {
+  
+lm(mpg ~ horsepower, data = analysis(split))
+
+}
+
+coef_boot <- boots2 %>%
+  dplyr:: mutate(model = map(splits, modelFitR),
+                 coef = map(model, tidy)) %>%
+  tidyr:: unnest(coef)
+
+head(coef_boot,10)
+
+```
+
+From this we can graph confidence intervals and begin to really see the variability of the proposed parameter estimates.
+
+```{r}
+
+
+
+```
+
+
+# Readings {-}
+
+I have already added links to a few pages where I have lifted code and edited it to fit my objectives, more indirectly those these pages have helped with my technical understanding and coding technique.
+
+https://alison.rbind.io/post/2020-02-27-better-tidymodels/
+https://daviddalpiaz.github.io/r4sl/
+https://juliasilge.com/blog/intro-tidymodels/
+https://blog.methodsconsultants.com/posts/understanding-bootstrap-confidence-interval-output-from-the-r-boot-package/
+
 
